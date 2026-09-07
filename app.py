@@ -5,14 +5,18 @@ import hashlib
 import base64
 import json
 import requests
+import time
 
 app = Flask(__name__)
 
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 
-# 中央氣象署：台灣紅外線彩色衛星雲圖
+# 中央氣象署：衛星雲圖
 SATELLITE_URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Observation/O-B0028-003.jpg"
+
+# 中央氣象署：雷達整合回波圖
+RADAR_URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Observation/O-A0058-001.png"
 
 
 def verify_signature(body, signature):
@@ -55,7 +59,6 @@ def webhook():
     body = request.get_data()
     signature = request.headers.get("x-line-signature", "")
 
-    # 驗證 LINE Webhook
     if not CHANNEL_SECRET:
         return "Channel Secret missing", 500
 
@@ -77,24 +80,48 @@ def webhook():
         text = message.get("text", "").strip()
         reply_token = event.get("replyToken")
 
-        if text in ["衛星", "衛星雲圖", "雲圖"]:
-
-            reply_message(
-                reply_token,
-                {
-                    "type": "image",
-                    "originalContentUrl": SATELLITE_URL,
-                    "previewImageUrl": SATELLITE_URL
-                }
-            )
-
-        elif text in ["測試", "test", "TEST"]:
+        # 測試
+        if text in ["測試", "test", "TEST"]:
 
             reply_message(
                 reply_token,
                 {
                     "type": "text",
                     "text": "LINE Weather Bot 正常運作中 ☁️"
+                }
+            )
+
+        # 衛星雲圖
+        elif text in ["衛星", "衛星雲圖", "雲圖"]:
+
+            image_url = SATELLITE_URL + "?t=" + str(time.time())
+
+            reply_message(
+                reply_token,
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url
+                }
+            )
+
+        # 雷達回波圖
+        elif text in [
+            "雨量",
+            "下雨",
+            "雷達",
+            "雷達回波",
+            "雷達回波圖"
+        ]:
+
+            image_url = RADAR_URL + "?t=" + str(time.time())
+
+            reply_message(
+                reply_token,
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url
                 }
             )
 

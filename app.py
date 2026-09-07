@@ -6,14 +6,20 @@ import base64
 import json
 import requests
 import time
+import random
 
 app = Flask(__name__)
 
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 
-# 中央氣象署：衛星雲圖
-SATELLITE_URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Observation/O-B0028-003.jpg"
+# Cloudinary
+CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
+
+# Cloudinary 抽卡資料夾
+CARD_FOLDER = "cards"
 
 # 中央氣象署：雷達整合回波圖
 RADAR_URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Observation/O-A0058-001.png"
@@ -53,6 +59,124 @@ def reply_message(reply_token, message):
     print("LINE 回覆結果：", response.status_code, response.text)
 
 
+def get_cards():
+    """
+    取得 Cloudinary cards 資料夾裡所有圖片＋影片
+    超過 500 個會自動繼續抓
+    """
+
+    url = "https://api.cloudinary.com/v1_1/" + CLOUDINARY_CLOUD_NAME + "/resources/by_asset_folder"
+
+    cards = []
+    next_cursor = None
+
+    while True:
+
+        params = {
+            "asset_folder": CARD_FOLDER,
+            "max_results": 500
+        }
+
+        if next_cursor:
+            params["next_cursor"] = next_cursor
+
+        response = requests.get(
+            url,
+            params=params,
+            auth=(CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET),
+            timeout=20
+        )
+
+        print("Cloudinary 回覆：", response.status_code)
+
+        if response.status_code != 200:
+            print("Cloudinary 錯誤：", response.text)
+            return []
+
+        data = response.json()
+
+        for asset in data.get("resources", []):
+
+            resource_type = asset.get("resource_type")
+            secure_url = asset.get("secure_url")
+
+            if not secure_url:
+                continue
+
+            # 圖片
+            if resource_type == "image":
+
+                cards.append({
+                    "type": "image",
+                    "url": secure_url
+                })
+
+            # 影片
+            elif resource_type == "video":
+
+                # Cloudinary 自動從影片第 0 秒產生 JPG 預覽圖
+                preview_url = secure_url.replace(
+                    "/video/upload/",
+                    "/video/upload/w_600,q_auto,so_0/"
+                )
+
+                # 把影片副檔名改成 jpg
+                if "." in preview_url:
+                    preview_url = preview_url.rsplit(".", 1)[0] + ".jpg"
+
+                cards.append({
+                    "type": "video",
+                    "url": secure_url,
+                    "preview": preview_url
+                })
+
+        next_cursor = data.get("next_cursor")
+
+        if not next_cursor:
+            break
+
+    print("目前抽卡池數量：", len(cards))
+
+    return cards
+
+
+def draw_card(reply_token):
+
+    cards = get_cards()
+
+    if not cards:
+        print("抽卡池沒有找到圖片或影片")
+        return
+
+    card = random.choice(cards)
+
+    print("抽到：", card)
+
+    # 抽到圖片
+    if card["type"] == "image":
+
+        reply_message(
+            reply_token,
+            {
+                "type": "image",
+                "originalContentUrl": card["url"],
+                "previewImageUrl": card["url"]
+            }
+        )
+
+    # 抽到影片
+    elif card["type"] == "video":
+
+        reply_message(
+            reply_token,
+            {
+                "type": "video",
+                "originalContentUrl": card["url"],
+                "previewImageUrl": card["preview"]
+            }
+        )
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
@@ -80,36 +204,14 @@ def webhook():
         text = message.get("text", "").strip()
         reply_token = event.get("replyToken")
 
-        # 測試
-        if text in ["測試", "test", "TEST"]:
+        # =========================
+        # 雷達
+        # =========================
 
-            reply_message(
-                reply_token,
-                {
-                    "type": "text",
-                    "text": "LINE Weather Bot 正常運作中 ☁️"
-                }
-            )
-
-        # 衛星雲圖
-        elif text in ["衛星", "衛星雲圖", "雲圖"]:
-
-            image_url = SATELLITE_URL + "?t=" + str(time.time())
-
-            reply_message(
-                reply_token,
-                {
-                    "type": "image",
-                    "originalContentUrl": image_url,
-                    "previewImageUrl": image_url
-                }
-            )
-
-        # 雷達回波圖
-        elif text in [
+        if text in [
+            "雷達",
             "雨量",
             "下雨",
-            "雷達",
             "雷達回波",
             "雷達回波圖"
         ]:
@@ -124,6 +226,14 @@ def webhook():
                     "previewImageUrl": image_url
                 }
             )
+
+        # =========================
+        # 看看老婆
+        # =========================
+
+        elif text == "看看老婆":
+
+            draw_card(reply_token)
 
     return "OK", 200
 

@@ -7,7 +7,6 @@ import json
 import requests
 import time
 import random
-from openai import OpenAI
 
 app = Flask(__name__)
 
@@ -17,6 +16,7 @@ app = Flask(__name__)
 
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
+
 
 # =========================
 # Cloudinary
@@ -28,35 +28,6 @@ CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
 
 CARD_FOLDER = "cards"
 
-# =========================
-# OpenAI
-# =========================
-
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-
-if OPENAI_API_KEY:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-else:
-    client = None
-
-AI_MODEL = "gpt-5.6-luna"
-
-# AI 人設
-AI_INSTRUCTIONS = """
-你是 LINE 裡的一個親切、自然、會陪人聊天的 AI。
-
-聊天時請遵守：
-
-1. 使用繁體中文。
-2. 語氣自然，不要像客服。
-3. 回覆不要太長，通常 1～4 句。
-4. 可以適度使用 emoji，但不要每句都使用。
-5. 如果對方只是聊天，就自然聊天，不要一直問問題。
-6. 如果對方心情不好，要溫柔一點。
-7. 不要說自己是客服。
-8. 不要一直重複「有什麼我可以幫你的嗎」。
-9. 可以有一點可愛、親近的感覺，但不要過度油膩。
-"""
 
 # =========================
 # 雷達
@@ -186,7 +157,10 @@ def get_cards():
             if not secure_url:
                 continue
 
+            # =========================
             # 圖片
+            # =========================
+
             if resource_type == "image":
 
                 cards.append({
@@ -194,7 +168,10 @@ def get_cards():
                     "url": secure_url
                 })
 
+            # =========================
             # 影片
+            # =========================
+
             elif resource_type == "video":
 
                 preview_url = secure_url.replace(
@@ -203,9 +180,11 @@ def get_cards():
                 )
 
                 if "." in preview_url:
+
                     preview_url = (
                         preview_url.rsplit(
-                            ".", 1
+                            ".",
+                            1
                         )[0]
                         + ".jpg"
                     )
@@ -232,7 +211,7 @@ def get_cards():
 
 
 # =========================
-# 抽老婆
+# 看看老婆
 # =========================
 
 def draw_card(reply_token):
@@ -254,7 +233,10 @@ def draw_card(reply_token):
         card
     )
 
+    # =========================
     # 圖片
+    # =========================
+
     if card["type"] == "image":
 
         reply_message(
@@ -266,7 +248,10 @@ def draw_card(reply_token):
             }
         )
 
+    # =========================
     # 影片
+    # =========================
+
     elif card["type"] == "video":
 
         reply_message(
@@ -276,54 +261,6 @@ def draw_card(reply_token):
                 "originalContentUrl": card["url"],
                 "previewImageUrl": card["preview"]
             }
-        )
-
-
-# =========================
-# AI 聊天
-# =========================
-
-def ai_chat(text):
-
-    if not client:
-
-        print(
-            "OPENAI_API_KEY 尚未設定"
-        )
-
-        return "我現在還沒有連上 AI 🥲"
-
-
-    try:
-
-        response = client.responses.create(
-
-            model=AI_MODEL,
-
-            instructions=AI_INSTRUCTIONS,
-
-            input=text,
-
-            max_output_tokens=300
-        )
-
-        answer = response.output_text
-
-        if not answer:
-            return "嗯……我突然不知道要說什麼了 😂"
-
-        return answer.strip()
-
-    except Exception as e:
-
-        print(
-            "OpenAI 錯誤：",
-            repr(e)
-        )
-
-        return (
-            "等等，我剛剛好像卡住了 😂\n"
-            "你再跟我說一次～"
         )
 
 
@@ -429,32 +366,18 @@ def webhook():
             )
 
         # =========================
-        # 其他文字 → AI
+        # 其他文字
         # =========================
 
         else:
 
             print(
-                "收到聊天：",
+                "收到未設定的文字：",
                 text
             )
 
-            answer = ai_chat(
-                text
-            )
+            # 不回覆
 
-            print(
-                "AI 回覆：",
-                answer
-            )
-
-            reply_message(
-                reply_token,
-                {
-                    "type": "text",
-                    "text": answer
-                }
-            )
 
     return "OK", 200
 
@@ -467,7 +390,7 @@ def webhook():
 def home():
 
     return (
-        "LINE Weather Bot + AI OK",
+        "LINE Weather Bot OK",
         200
     )
 

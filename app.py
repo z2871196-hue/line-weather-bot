@@ -7,37 +7,95 @@ import json
 import requests
 import time
 import random
+from openai import OpenAI
 
 app = Flask(__name__)
+
+# =========================
+# LINE
+# =========================
 
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
 
+# =========================
 # Cloudinary
+# =========================
+
 CLOUDINARY_CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME")
 CLOUDINARY_API_KEY = os.environ.get("CLOUDINARY_API_KEY")
 CLOUDINARY_API_SECRET = os.environ.get("CLOUDINARY_API_SECRET")
 
-# Cloudinary 抽卡資料夾
 CARD_FOLDER = "cards"
 
-# 中央氣象署：雷達整合回波圖
-RADAR_URL = "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/Observation/O-A0058-001.png"
+# =========================
+# OpenAI
+# =========================
 
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+if OPENAI_API_KEY:
+    client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    client = None
+
+AI_MODEL = "gpt-5.6-luna"
+
+# AI 人設
+AI_INSTRUCTIONS = """
+你是 LINE 裡的一個親切、自然、會陪人聊天的 AI。
+
+聊天時請遵守：
+
+1. 使用繁體中文。
+2. 語氣自然，不要像客服。
+3. 回覆不要太長，通常 1～4 句。
+4. 可以適度使用 emoji，但不要每句都使用。
+5. 如果對方只是聊天，就自然聊天，不要一直問問題。
+6. 如果對方心情不好，要溫柔一點。
+7. 不要說自己是客服。
+8. 不要一直重複「有什麼我可以幫你的嗎」。
+9. 可以有一點可愛、親近的感覺，但不要過度油膩。
+"""
+
+# =========================
+# 雷達
+# =========================
+
+RADAR_URL = (
+    "https://cwaopendata.s3.ap-northeast-1.amazonaws.com/"
+    "Observation/O-A0058-001.png"
+)
+
+
+# =========================
+# LINE 簽章驗證
+# =========================
 
 def verify_signature(body, signature):
+
     hash_value = hmac.new(
         CHANNEL_SECRET.encode("utf-8"),
         body,
         hashlib.sha256
     ).digest()
 
-    expected_signature = base64.b64encode(hash_value).decode("utf-8")
+    expected_signature = base64.b64encode(
+        hash_value
+    ).decode("utf-8")
 
-    return hmac.compare_digest(expected_signature, signature)
+    return hmac.compare_digest(
+        expected_signature,
+        signature
+    )
 
+
+# =========================
+# LINE 回覆
+# =========================
 
 def reply_message(reply_token, message):
+
     url = "https://api.line.me/v2/bot/message/reply"
 
     headers = {
@@ -53,19 +111,28 @@ def reply_message(reply_token, message):
     response = requests.post(
         url,
         headers=headers,
-        json=data
+        json=data,
+        timeout=20
     )
 
-    print("LINE 回覆結果：", response.status_code, response.text)
+    print(
+        "LINE 回覆結果：",
+        response.status_code,
+        response.text
+    )
 
+
+# =========================
+# Cloudinary 抽卡
+# =========================
 
 def get_cards():
-    """
-    取得 Cloudinary cards 資料夾裡所有圖片＋影片
-    超過 500 個會自動繼續抓
-    """
 
-    url = "https://api.cloudinary.com/v1_1/" + CLOUDINARY_CLOUD_NAME + "/resources/by_asset_folder"
+    url = (
+        "https://api.cloudinary.com/v1_1/"
+        + CLOUDINARY_CLOUD_NAME
+        + "/resources/by_asset_folder"
+    )
 
     cards = []
     next_cursor = None
@@ -83,22 +150,38 @@ def get_cards():
         response = requests.get(
             url,
             params=params,
-            auth=(CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET),
+            auth=(
+                CLOUDINARY_API_KEY,
+                CLOUDINARY_API_SECRET
+            ),
             timeout=20
         )
 
-        print("Cloudinary 回覆：", response.status_code)
+        print(
+            "Cloudinary 回覆：",
+            response.status_code
+        )
 
         if response.status_code != 200:
-            print("Cloudinary 錯誤：", response.text)
+
+            print(
+                "Cloudinary 錯誤：",
+                response.text
+            )
+
             return []
 
         data = response.json()
 
         for asset in data.get("resources", []):
 
-            resource_type = asset.get("resource_type")
-            secure_url = asset.get("secure_url")
+            resource_type = asset.get(
+                "resource_type"
+            )
+
+            secure_url = asset.get(
+                "secure_url"
+            )
 
             if not secure_url:
                 continue
@@ -114,15 +197,18 @@ def get_cards():
             # 影片
             elif resource_type == "video":
 
-                # Cloudinary 自動從影片第 0 秒產生 JPG 預覽圖
                 preview_url = secure_url.replace(
                     "/video/upload/",
                     "/video/upload/w_600,q_auto,so_0/"
                 )
 
-                # 把影片副檔名改成 jpg
                 if "." in preview_url:
-                    preview_url = preview_url.rsplit(".", 1)[0] + ".jpg"
+                    preview_url = (
+                        preview_url.rsplit(
+                            ".", 1
+                        )[0]
+                        + ".jpg"
+                    )
 
                 cards.append({
                     "type": "video",
@@ -130,29 +216,45 @@ def get_cards():
                     "preview": preview_url
                 })
 
-        next_cursor = data.get("next_cursor")
+        next_cursor = data.get(
+            "next_cursor"
+        )
 
         if not next_cursor:
             break
 
-    print("目前抽卡池數量：", len(cards))
+    print(
+        "目前抽卡池數量：",
+        len(cards)
+    )
 
     return cards
 
+
+# =========================
+# 抽老婆
+# =========================
 
 def draw_card(reply_token):
 
     cards = get_cards()
 
     if not cards:
-        print("抽卡池沒有找到圖片或影片")
+
+        print(
+            "抽卡池沒有找到圖片或影片"
+        )
+
         return
 
     card = random.choice(cards)
 
-    print("抽到：", card)
+    print(
+        "抽到：",
+        card
+    )
 
-    # 抽到圖片
+    # 圖片
     if card["type"] == "image":
 
         reply_message(
@@ -164,7 +266,7 @@ def draw_card(reply_token):
             }
         )
 
-    # 抽到影片
+    # 影片
     elif card["type"] == "video":
 
         reply_message(
@@ -177,32 +279,117 @@ def draw_card(reply_token):
         )
 
 
-@app.route("/webhook", methods=["POST"])
+# =========================
+# AI 聊天
+# =========================
+
+def ai_chat(text):
+
+    if not client:
+
+        print(
+            "OPENAI_API_KEY 尚未設定"
+        )
+
+        return "我現在還沒有連上 AI 🥲"
+
+
+    try:
+
+        response = client.responses.create(
+
+            model=AI_MODEL,
+
+            instructions=AI_INSTRUCTIONS,
+
+            input=text,
+
+            max_output_tokens=300
+        )
+
+        answer = response.output_text
+
+        if not answer:
+            return "嗯……我突然不知道要說什麼了 😂"
+
+        return answer.strip()
+
+    except Exception as e:
+
+        print(
+            "OpenAI 錯誤：",
+            repr(e)
+        )
+
+        return (
+            "等等，我剛剛好像卡住了 😂\n"
+            "你再跟我說一次～"
+        )
+
+
+# =========================
+# Webhook
+# =========================
+
+@app.route(
+    "/webhook",
+    methods=["POST"]
+)
 def webhook():
 
     body = request.get_data()
-    signature = request.headers.get("x-line-signature", "")
+
+    signature = request.headers.get(
+        "x-line-signature",
+        ""
+    )
 
     if not CHANNEL_SECRET:
-        return "Channel Secret missing", 500
 
-    if not signature or not verify_signature(body, signature):
-        return "Invalid signature", 400
+        return (
+            "Channel Secret missing",
+            500
+        )
+
+    if (
+        not signature
+        or not verify_signature(
+            body,
+            signature
+        )
+    ):
+
+        return (
+            "Invalid signature",
+            400
+        )
 
     data = json.loads(body)
 
-    for event in data.get("events", []):
+    for event in data.get(
+        "events",
+        []
+    ):
 
         if event.get("type") != "message":
             continue
 
-        message = event.get("message", {})
+        message = event.get(
+            "message",
+            {}
+        )
 
         if message.get("type") != "text":
             continue
 
-        text = message.get("text", "").strip()
-        reply_token = event.get("replyToken")
+        text = message.get(
+            "text",
+            ""
+        ).strip()
+
+        reply_token = event.get(
+            "replyToken"
+        )
 
         # =========================
         # 雷達
@@ -216,7 +403,11 @@ def webhook():
             "雷達回波圖"
         ]:
 
-            image_url = RADAR_URL + "?t=" + str(time.time())
+            image_url = (
+                RADAR_URL
+                + "?t="
+                + str(time.time())
+            )
 
             reply_message(
                 reply_token,
@@ -233,18 +424,66 @@ def webhook():
 
         elif text == "看看老婆":
 
-            draw_card(reply_token)
+            draw_card(
+                reply_token
+            )
+
+        # =========================
+        # 其他文字 → AI
+        # =========================
+
+        else:
+
+            print(
+                "收到聊天：",
+                text
+            )
+
+            answer = ai_chat(
+                text
+            )
+
+            print(
+                "AI 回覆：",
+                answer
+            )
+
+            reply_message(
+                reply_token,
+                {
+                    "type": "text",
+                    "text": answer
+                }
+            )
 
     return "OK", 200
 
 
+# =========================
+# 首頁
+# =========================
+
 @app.route("/")
 def home():
-    return "LINE Weather Bot OK", 200
 
+    return (
+        "LINE Weather Bot + AI OK",
+        200
+    )
+
+
+# =========================
+# 啟動
+# =========================
 
 if __name__ == "__main__":
+
     app.run(
         host="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080))
+        port=int(
+            os.environ.get(
+                "PORT",
+                8080
+            )
+        )
     )
